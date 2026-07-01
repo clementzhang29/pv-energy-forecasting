@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import sys
@@ -105,6 +105,75 @@ def apply_low_output_guard(
     summary = {
         "daily_prediction_threshold": float(threshold),
         "multiplier": float(multiplier),
+        "guarded_point_rows": int(guard_mask.sum()),
+    }
+    for split, count in guarded_days.items():
+        summary[f"guarded_days_{split}"] = int(count)
+    return result.drop(columns=["_guard_daily_pred"]), summary
+
+
+
+def apply_adaptive_low_output_guard(
+    frame: pd.DataFrame,
+    pred_col: str,
+    output_col: str,
+    train_data: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    """自适应低输出 guard：基于训练集低输出日的分布动态确定阈值和缩放系数。
+    
+    策略：在训练集中找到低输出日（target 低于 25% 分位），
+    计算这些日子的日均 solar_proxy 和日均预测的比值，以此确定动态阈值。
+    """
+    result = frame.copy()
+    day_key = ["split", "eval_split", "deviceSn", "date"]
+    
+    # 计算日级预测总量
+    daily_pred = (
+        result.groupby(day_key, observed=True)[pred_col]
+        .sum()
+        .reset_index(name="_guard_daily_pred")
+    )
+    result = result.merge(daily_pred, on=day_key, how="left")
+    
+    cold_start_alpha = result.get("cold_start_alpha", pd.Series(1.0, index=result.index)).fillna(1)
+    
+    # 动态阈值：基于训练集日发电量分布
+    if train_data is not None and "daily_target" in train_data.columns:
+        low_thresh = float(train_data["daily_target"].quantile(0.15))  # 15% 分位
+        # 计算缩放系数：中等规模缩放到 0.6
+        multiplier = 0.6
+    else:
+        low_thresh = 0.06
+        multiplier = 0.5
+    
+    # 动态缩放系数：日预测越低缩放越激进
+    daily_vals = result["_guard_daily_pred"].values
+    multipliers = np.ones(len(result), dtype=float)
+    cold_idx = (cold_start_alpha <= 1e-6).values
+    for i in np.where(cold_idx)[0]:
+        d = daily_vals[i]
+        if d <= low_thresh * 0.5:
+            multipliers[i] = 0.4
+        elif d <= low_thresh:
+            multipliers[i] = multiplier
+        elif d <= low_thresh * 1.5:
+            multipliers[i] = 0.8
+    
+    guard_mask = cold_idx & (daily_vals <= low_thresh * 1.5)
+    result[output_col] = result[pred_col]
+    result.loc[guard_mask, output_col] *= multipliers[guard_mask]
+    result[output_col] = sanitize_predictions(result, output_col)
+    
+    guarded_days = (
+        result.loc[guard_mask, day_key]
+        .drop_duplicates()
+        .groupby("eval_split", observed=True)
+        .size()
+        .to_dict()
+    )
+    summary = {
+        "low_threshold_dynamic": float(low_thresh),
+        "base_multiplier": float(multiplier),
         "guarded_point_rows": int(guard_mask.sum()),
     }
     for split, count in guarded_days.items():
@@ -221,7 +290,29 @@ def run() -> None:
     models["E01_lgbm_raw_point"] = raw_model
     point["pred_raw_point"] = raw_pred
     point["pred_raw_point"] = sanitize_predictions(point, "pred_raw_point")
-    metrics["experiments"]["E01_lgbm_raw_point"] = experiment_metrics(point, "pred_raw_point")
+    metrics["experiments"]["E01_lgbm_raw_point"]
+    # ==== 优化实验 E12: Huber 损失点级模型 ====
+    model_huber, pred_huber = fit_predict_huber(
+        train, point, feature_sets.point_features, target="pvGenTotal"
+    )
+    models["E12_huber_raw_point"] = model_huber
+    point["pred_huber_raw_point"] = np.asarray(pred_huber, dtype=float).clip(min=0)
+    solar_off = (point["is_solar_available"] <= 0) | (point["solar_proxy"] <= 1e-8)
+    point.loc[solar_off, "pred_huber_raw_point"] = 0.0
+    metrics["experiments"]["E12_huber_raw_point"] = experiment_metrics(
+        point, "pred_huber_raw_point"
+    )
+
+    # ==== 优化实验 E13: Fair 损失点级模型 ====
+    model_fair, pred_fair = fit_predict_fair(
+        train, point, feature_sets.point_features, target="pvGenTotal"
+    )
+    models["E13_fair_raw_point"] = model_fair
+    point["pred_fair_raw_point"] = np.asarray(pred_fair, dtype=float).clip(min=0)
+    point.loc[solar_off, "pred_fair_raw_point"] = 0.0
+    metrics["experiments"]["E13_fair_raw_point"] = experiment_metrics(
+        point, "pred_fair_raw_point"
+    ) = experiment_metrics(point, "pred_raw_point")
 
     norm_train = train[train["solar_proxy"] > 1e-5].copy()
     norm_model, norm_pred = fit_predict(
@@ -268,7 +359,25 @@ def run() -> None:
         output_col="pred_norm_calibrated",
     )
     point["pred_norm_calibrated"] = calibrated["pred_norm_calibrated"]
-    metrics["experiments"]["E05_norm_plus_daily_calibration"] = experiment_metrics(
+    metrics["experiments"]["E05_norm_plus_daily_calibration"]
+    # ==== 优化实验 E14: 加权日级校准 ====
+    calib_model_w, calibrated_daily_w = fit_daily_calibrator_weighted(
+        point,
+        raw_pred_col="pred_norm_point",
+        daily_df=daily,
+        daily_features=daily_features,
+    )
+    models["E14_weighted_calibrator"] = calib_model_w
+    calibrated_w = rescale_point_predictions(
+        point,
+        raw_pred_col="pred_norm_point",
+        daily_pred=calibrated_daily_w,
+        output_col="pred_weighted_calibrated",
+    )
+    point["pred_weighted_calibrated"] = calibrated_w["pred_weighted_calibrated"]
+    metrics["experiments"]["E14_weighted_calibration"] = experiment_metrics(
+        point, "pred_weighted_calibrated"
+    ) = experiment_metrics(
         point, "pred_norm_calibrated"
     )
 
@@ -339,7 +448,18 @@ def run() -> None:
         output_col="pred_piecewise_low_output_guard",
     )
     metrics["piecewise_low_output_guard"] = piecewise_guard_summary
-    metrics["experiments"]["E11_piecewise_low_output_guard"] = experiment_metrics(
+    metrics["experiments"]["E11_piecewise_low_output_guard"]
+    # ==== 优化实验 E15: 自适应低输出 guard ====
+    point, adaptive_guard_summary = apply_adaptive_low_output_guard(
+        point,
+        pred_col="pred_history_fallback",
+        output_col="pred_adaptive_low_output_guard",
+        train_data=daily[daily["eval_split"] == "train"].copy(),
+    )
+    metrics["adaptive_low_output_guard"] = adaptive_guard_summary
+    metrics["experiments"]["E15_adaptive_low_output_guard"] = experiment_metrics(
+        point, "pred_adaptive_low_output_guard"
+    ) = experiment_metrics(
         point, "pred_piecewise_low_output_guard"
     )
 
@@ -361,18 +481,17 @@ def run() -> None:
         "pred_norm_point",
         "pred_daily_model_rescaled",
         "pred_norm_calibrated",
-        "pred_validated_blend",
-        "pred_history_fallback",
-        "pred_low_output_guard",
-        "pred_precision_low_output_guard",
-        "pred_piecewise_low_output_guard",
-        "pred_seen_new_branch",
+        "pred_validated_blend","pred_history_fallback","pred_low_output_guard","pred_precision_low_output_guard","pred_piecewise_low_output_guard","pred_adaptive_low_output_guard","pred_seen_new_branch",
     ]
     candidate_scores: dict[str, float] = {}
     for col in candidate_cols:
         split_metrics = metrics["experiments"][
             {
                 "pred_irradiance_baseline": "E00_irradiance_baseline",
+                "pred_huber_raw_point": "E12_huber_raw_point",
+                "pred_fair_raw_point": "E13_fair_raw_point",
+                "pred_weighted_calibrated": "E14_weighted_calibration",
+                "pred_adaptive_low_output_guard": "E15_adaptive_low_output_guard",
                 "pred_raw_point": "E01_lgbm_raw_point",
                 "pred_norm_point": "E03_lgbm_norm_target",
                 "pred_daily_model_rescaled": "E02_lgbm_daily_rescaled",
@@ -442,6 +561,7 @@ def run() -> None:
             low_output_guard_daily=("pred_low_output_guard", "sum"),
             precision_low_output_guard_daily=("pred_precision_low_output_guard", "sum"),
             piecewise_low_output_guard_daily=("pred_piecewise_low_output_guard", "sum"),
+            adaptive_low_output_guard_daily=("pred_adaptive_low_output_guard", "sum"),
             seen_new_branch_daily=("pred_seen_new_branch", "sum"),
             deployment_daily=("deployment_prediction", "sum"),
         )
@@ -484,3 +604,5 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
+
+

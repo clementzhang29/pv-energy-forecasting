@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -95,6 +95,80 @@ def add_physics_features(frame: pd.DataFrame) -> pd.DataFrame:
     ).astype("float32")
     return frame
 
+
+
+def add_radiation_profile_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """为每个设备添加辐射曲线相似度特征帮助冷启动容量估计。
+    
+    对设备的每日 15 分钟辐射曲线做归一化后求均值，得到该设备的典型辐射 profile。
+    这个 profile 独立于发电量，只依赖天气和位置，可帮助未见设备估计容量尺度。
+    """
+    if "solar_proxy" not in frame.columns or "deviceSn" not in frame.columns:
+        return frame
+    if frame["solar_proxy"].nunique() <= 1:
+        return frame
+    # 每个设备的典型归一化辐射曲线
+    device_profile = (
+        frame.groupby(["deviceSn", "slot_id"], observed=True)["solar_proxy"]
+        .mean()
+        .groupby("deviceSn", observed=True)
+        .apply(lambda x: (x / (x.max() + 1e-9)).to_list())
+        .reset_index(name="radiation_profile")
+    )
+    # 为每个设备计算与其他所有设备的 profile 余弦相似度均值
+    from sklearn.metrics.pairwise import cosine_similarity
+    profiles = np.array(device_profile["radiation_profile"].to_list())
+    sim = cosine_similarity(profiles)
+    # mask 自己
+    np.fill_diagonal(sim, 0)
+    n = sim.shape[1]
+    mean_sim = sim.sum(axis=1) / np.maximum(n - 1, 1)
+    device_profile["radiation_similarity_mean"] = mean_sim
+    frame = frame.merge(
+        device_profile[["deviceSn", "radiation_similarity_mean"]],
+        on="deviceSn",
+        how="left"
+    )
+    frame["radiation_similarity_mean"] = frame["radiation_similarity_mean"].fillna(0)
+    return frame
+
+
+def add_weather_cluster_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """基于日级天气条件（辐照总量、温度、湿度）做简单聚类，
+    为冷启动设备提供天气类型先验。"""
+    required = ["solar_proxy", "deviceSn", "date", "split"]
+    missing = [c for c in required if c not in frame.columns]
+    if missing:
+        return frame
+    # 构建日级天气概要
+    day_weather = (
+        frame.groupby(["deviceSn", "date"], observed=True)
+        .agg(
+            solar_mean=("solar_proxy", "mean"),
+            solar_max=("solar_proxy", "max"),
+        )
+        .reset_index()
+    )
+    if "temperature_2m" in frame.columns:
+        temp = frame.groupby(["deviceSn", "date"], observed=True)["temperature_2m"].mean().reset_index()
+        day_weather = day_weather.merge(temp, on=["deviceSn", "date"], how="left")
+    # 按天气条件分桶：多云/晴/阴
+    day_weather["weather_bin"] = 0  # default
+    if "solar_max" in day_weather.columns:
+        day_weather.loc[day_weather["solar_max"] > 700, "weather_bin"] = 2  # 晴
+        day_weather.loc[
+            (day_weather["solar_max"] > 300) & (day_weather["solar_max"] <= 700), "weather_bin"
+        ] = 1  # 多云
+    # 将天气桶编码合并回原始 frame
+    weather_map = dict(zip(
+        zip(day_weather["deviceSn"], day_weather["date"]),
+        day_weather["weather_bin"]
+    ))
+    frame["weather_bin"] = frame.apply(
+        lambda r: weather_map.get((r["deviceSn"], r["date"]), 0),
+        axis=1
+    ).astype("int32")
+    return frame
 
 def add_spatial_features(frame: pd.DataFrame) -> pd.DataFrame:
     _to_numeric(frame, [c for c in ["latitude", "longitude"] if c in frame.columns])
@@ -355,3 +429,5 @@ def make_daily_frame(point_df: pd.DataFrame) -> pd.DataFrame:
     daily["daily_target_log1p"] = np.log1p(daily["daily_target"])
     daily["target_per_solar"] = daily["daily_target"] / (daily["solar_proxy_sum"] + EPS)
     return daily
+
+

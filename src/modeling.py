@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -65,7 +65,7 @@ def make_daily_model() -> object:
         {
             "n_estimators": 500,
             "learning_rate": 0.04,
-            "num_leaves": 32,
+            "num_leaves": 36,
             "min_child_samples": 15,
         }
     )
@@ -176,6 +176,92 @@ def rescale_point_predictions(
     return frame.drop(columns=["pred_day_calibrated"])
 
 
+
+def fit_daily_calibrator_weighted(
+    point_df: pd.DataFrame,
+    raw_pred_col: str,
+    daily_df: pd.DataFrame,
+    daily_features: list[str],
+    low_output_weight: float = 3.0,
+) -> tuple[object, pd.DataFrame]:
+    """日级校准加权重版：对低输出日加大权重，改善 MAPE 在低真实值区间表现。"""
+    raw_daily = (
+        point_df.groupby(["split", "deviceSn", "date"], observed=True)[raw_pred_col]
+        .sum()
+        .reset_index(name=f"{raw_pred_col}_sum")
+    )
+    daily = daily_df.merge(raw_daily, on=["split", "deviceSn", "date"], how="left")
+    feature_cols = [f"{raw_pred_col}_sum"] + daily_features
+    train = daily[daily["eval_split"] == "train"].copy()
+    model = make_daily_model()
+    weights = np.ones(len(train), dtype=float)
+    low_mask = train["daily_target"] < train["daily_target"].quantile(0.25)
+    weights[low_mask] = low_output_weight
+    model.fit(train[feature_cols], np.log1p(train["daily_target"]), sample_weight=weights)
+    daily["pred_day_calibrated"] = np.expm1(model.predict(daily[feature_cols]))
+    daily["pred_day_calibrated"] = daily["pred_day_calibrated"].clip(lower=0)
+    return model, daily[["split", "deviceSn", "date", "pred_day_calibrated"]]
+
+
+def make_gbdt_huber_model() -> object:
+    """Huber 损失 LightGBM 模型，对离群值更鲁棒。"""
+    model = _try_lightgbm({
+        "objective": "huber",
+        "n_estimators": 700,
+        "learning_rate": 0.035,
+        "num_leaves": 48,
+        "subsample": 0.85,
+        "colsample_bytree": 0.85,
+        "min_child_samples": 30,
+        "random_state": 42,
+        "n_jobs": -1,
+        "verbosity": -1,
+    })
+    if model is not None:
+        return model
+    return make_gbdt_model()
+
+
+def make_gbdt_fair_model() -> object:
+    """Fair 损失 LightGBM 模型，对 MAPE 指标更友好。"""
+    model = _try_lightgbm({
+        "objective": "fair",
+        "fair_c": 1.0,
+        "n_estimators": 700,
+        "learning_rate": 0.035,
+        "num_leaves": 48,
+        "subsample": 0.85,
+        "colsample_bytree": 0.85,
+        "min_child_samples": 30,
+        "random_state": 42,
+        "n_jobs": -1,
+        "verbosity": -1,
+    })
+    if model is not None:
+        return model
+    return make_gbdt_model()
+
+
+def fit_predict_huber(
+    train_df: pd.DataFrame,
+    all_df: pd.DataFrame,
+    features: list[str],
+    target: str,
+) -> tuple[object, np.ndarray]:
+    model = make_gbdt_huber_model() if _try_lightgbm() is not None else make_gbdt_model()
+    return fit_predict(train_df, all_df, features, target, model=model)
+
+
+def fit_predict_fair(
+    train_df: pd.DataFrame,
+    all_df: pd.DataFrame,
+    features: list[str],
+    target: str,
+) -> tuple[object, np.ndarray]:
+    model = make_gbdt_fair_model() if _try_lightgbm() is not None else make_gbdt_model()
+    return fit_predict(train_df, all_df, features, target, model=model)
+
+
 def fit_stacking_daily(
     daily_predictions: pd.DataFrame,
     pred_cols: list[str],
@@ -198,3 +284,4 @@ def fit_stacking_daily(
         min=0
     )
     return model, daily_predictions
+
