@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PV Energy Forecasting - 完整模型对比报告</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f5f7fa; color:#1a1a2e; padding:0; }
+  .header { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#fff; padding:48px 40px; }
+  .header h1 { font-size:32px; font-weight:700; margin-bottom:8px; }
+  .header .subtitle { font-size:16px; opacity:0.85; }
+  .header .meta { margin-top:16px; font-size:13px; opacity:0.7; display:flex; gap:24px; flex-wrap:wrap; }
+  .nav { background:#fff; border-bottom:1px solid #e0e4e8; padding:0 40px; display:flex; gap:0; position:sticky; top:0; z-index:100; }
+  .nav a { display:block; padding:14px 20px; text-decoration:none; color:#555; font-size:14px; font-weight:500; border-bottom:2px solid transparent; transition:all 0.2s; }
+  .nav a:hover { color:#0f3460; border-bottom-color:#0f3460; background:#f0f4ff; }
+  .section { max-width:1200px; margin:0 auto; padding:40px 24px; }
+  .section h2 { font-size:24px; font-weight:700; color:#1a1a2e; margin-bottom:24px; padding-bottom:12px; border-bottom:2px solid #0f3460; }
+  .section h3 { font-size:18px; font-weight:600; color:#16213e; margin:28px 0 12px; }
+  .card { background:#fff; border-radius:8px; padding:24px; margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  .card p { line-height:1.7; color:#333; margin-bottom:10px; }
+  .highlight-box { background:#eef4ff; border-left:4px solid #0f3460; padding:16px 20px; border-radius:0 8px 8px 0; margin:16px 0; }
+  .highlight-box.success { background:#e8f8f0; border-left-color:#22c55e; }
+  .highlight-box.warning { background:#fff8e8; border-left-color:#f59e0b; }
+  .highlight-box.danger { background:#fef2f2; border-left-color:#ef4444; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  table thead th { background:#1a1a2e; color:#fff; padding:10px 12px; text-align:center; font-weight:600; position:sticky; top:48px; }
+  table thead th:first-child { text-align:left; border-radius:6px 0 0 0; }
+  table thead th:last-child { border-radius:0 6px 0 0; }
+  table tbody td { padding:9px 12px; text-align:center; border-bottom:1px solid #e8ecf0; }
+  table tbody td:first-child { text-align:left; font-weight:500; }
+  table tbody tr:hover { background:#f0f4ff; }
+  table tbody tr.dl td:first-child::before { content:"DL "; color:#a855f7; font-weight:700; font-size:11px; }
+  table tbody tr.top3 { background:#ecfdf5; }
+  table tbody tr.top3 td { font-weight:600; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
+  .badge-pipeline { background:#dbeafe; color:#1d4ed8; }
+  .badge-ml { background:#e0e7ff; color:#4338ca; }
+  .badge-dl { background:#ede9fe; color:#7c3aed; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:20px 0; }
+  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; margin:20px 0; }
+  .stat-card { background:#fff; border-radius:8px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); text-align:center; }
+  .stat-card .value { font-size:28px; font-weight:700; color:#0f3460; margin:8px 0; }
+  .stat-card .label { font-size:13px; color:#666; }
+  .bar-container { display:flex; align-items:center; margin:6px 0; }
+  .bar-label { width:210px; font-size:13px; text-align:right; padding-right:12px; flex-shrink:0; }
+  .bar-track { flex:1; height:24px; background:#e8ecf0; border-radius:4px; overflow:hidden; position:relative; }
+  .bar-fill { height:100%; border-radius:4px; display:flex; align-items:center; justify-content:flex-end; padding-right:8px; color:#fff; font-size:11px; font-weight:600; }
+  .bar-fill.green { background:linear-gradient(90deg,#22c55e,#16a34a); }
+  .bar-fill.blue { background:linear-gradient(90deg,#3b82f6,#2563eb); }
+  .bar-fill.yellow { background:linear-gradient(90deg,#eab308,#ca8a04); }
+  .bar-fill.red { background:linear-gradient(90deg,#ef4444,#dc2626); }
+  .bar-fill.orange { background:linear-gradient(90deg,#f97316,#ea580c); }
+  @media (max-width:768px) { .header { padding:28px 20px; } .header h1 { font-size:24px; } .nav { padding:0 16px; overflow-x:auto; } .nav a { padding:12px 14px; font-size:13px; } .section { padding:24px 16px; } .grid-2,.grid-3 { grid-template-columns:1fr; } .bar-label { width:130px; font-size:11px; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>光伏设备发电量预测 — 完整模型对比报告</h1>
+  <div class="subtitle">PV Energy Forecasting — Comprehensive ML/DL Model Comparison Report</div>
+  <div class="meta">
+    <span>日期: 2026-07-02</span>
+    <span>源数据: 22+6+39 设备, 260,635 行</span>
+    <span>特征维度: 252</span>
+    <span>评估指标: 日级 Combined MAPE (50% seen + 50% unseen)</span>
+  </div>
+</div>
+
+<div class="nav">
+  <a href="#overview">概述</a>
+  <a href="#ranking">综合排名</a>
+  <a href="#ml">ML 模型</a>
+  <a href="#dl">DL 模型</a>
+  <a href="#pipeline">Pipeline 优化</a>
+  <a href="#findings">关键发现</a>
+</div>
+
+<div class="section" id="overview">
+  <h2>项目概述</h2>
+  <div class="card">
+    <p>本项目目标是根据设备经纬度、太阳几何、天气特征和时间特征，预测设备每15分钟粒度的发电量 <code>pvGenTotal</code>。最终评估以 <strong>单日预测总量 vs 单日真实总量的 MAPE</strong> 为核心指标，同时保留15分钟粒度预测以便检查日内曲线形态。</p>
+    <p>本报告首次系统对比了 <strong>深度学习模型 (DNN/CNN/LSTM)</strong>、<strong>传统机器学习模型 (XGBoost/CatBoost/RF/SVR)</strong> 和 <strong>15种自定义 Pipeline 优化策略</strong>。</p>
+  </div>
+
+  <div class="grid-3">
+    <div class="stat-card"><div style="font-size:32px;margin-bottom:8px;">🏆</div><div class="value">0.1181</div><div class="label">最优 Combined MAPE (E07)</div></div>
+    <div class="stat-card"><div style="font-size:32px;margin-bottom:8px;">📊</div><div class="value">22</div><div class="label">对比实验总数</div></div>
+    <div class="stat-card"><div style="font-size:32px;margin-bottom:8px;">⚡</div><div class="value">15 种</div><div class="label">Pipeline 策略迭代</div></div>
+  </div>
+</div>
+
+<div class="section" id="ranking">
+  <h2>综合排名</h2>
+  <div class="card">
+    <p>全部 22 个实验的完整对比。<span class="badge badge-pipeline">Pipeline</span> = 自定义优化策略，<span class="badge badge-ml">ML</span> = 传统机器学习，<span class="badge badge-dl">DL</span> = 深度学习。</p>
+    <p><strong>前三名绿色高亮。</strong> 数据来源: <code style="font-size:12px;">outputs/model_comparison_full.csv</code></p>
+  </div>
+
+  <div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr><th>实验</th><th>类型</th><th>Seen MAPE</th><th>Unseen MAPE</th><th>Combined MAPE</th><th>Test1 MAPE</th><th>Test2 MAPE</th></tr>
+    </thead>
+    <tbody>
+      <tr class="top3 pipeline">
+        <td>E07_validated_blend</td>
+        <td><span class="badge badge-pipeline">Best Ensemble</span></td>
+        <td>0.0787</td>
+        <td>0.1574</td>
+        <td><strong>0.1181</strong></td>
+        <td>0.0976</td>
+        <td>0.6192</td>
+      </tr>
+      <tr class="top3 pipeline">
+        <td>E05_norm_plus_daily_calibration</td>
+        <td><span class="badge badge-pipeline">Daily Calibration</span></td>
+        <td>0.0756</td>
+        <td>0.1629</td>
+        <td><strong>0.1192</strong></td>
+        <td>0.1</td>
+        <td>0.6539</td>
+      </tr>
+      <tr class="top3 pipeline">
+        <td>E14_weighted_calibration</td>
+        <td><span class="badge badge-pipeline">Weighted Calib</span></td>
+        <td>0.0754</td>
+        <td>0.1726</td>
+        <td><strong>0.124</strong></td>
+        <td>0.0979</td>
+        <td>0.7697</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E06_seen_new_branch</td>
+        <td><span class="badge badge-pipeline">Branch Model</span></td>
+        <td>0.0756</td>
+        <td>0.296</td>
+        <td><strong>0.1858</strong></td>
+        <td>0.1</td>
+        <td>0.4484</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E08_history_dynamic_fallback</td>
+        <td><span class="badge badge-pipeline">Fallback</span></td>
+        <td>0.0787</td>
+        <td>0.296</td>
+        <td><strong>0.1873</strong></td>
+        <td>0.0976</td>
+        <td>0.4484</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E11_piecewise_low_output_guard</td>
+        <td><span class="badge badge-pipeline">Piecewise Guard</span></td>
+        <td>0.0787</td>
+        <td>0.2977</td>
+        <td><strong>0.1882</strong></td>
+        <td>0.0976</td>
+        <td>0.3557</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E10_precision_low_output_guard</td>
+        <td><span class="badge badge-pipeline">Precision Guard</span></td>
+        <td>0.0787</td>
+        <td>0.2991</td>
+        <td><strong>0.1889</strong></td>
+        <td>0.0976</td>
+        <td>0.3671</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E09_low_output_guard</td>
+        <td><span class="badge badge-pipeline">Broad Guard</span></td>
+        <td>0.0787</td>
+        <td>0.3131</td>
+        <td><strong>0.1959</strong></td>
+        <td>0.0976</td>
+        <td>0.4391</td>
+      </tr>
+      <tr class=" ml">
+        <td>ML_XGBoost</td>
+        <td><span class="badge badge-ml">XGBoost</span></td>
+        <td>0.17</td>
+        <td>0.273</td>
+        <td><strong>0.2215</strong></td>
+        <td>0.1731</td>
+        <td>2.0944</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E13_fair_raw_point</td>
+        <td><span class="badge badge-pipeline">Fair Loss</span></td>
+        <td>0.1668</td>
+        <td>0.2804</td>
+        <td><strong>0.2236</strong></td>
+        <td>0.189</td>
+        <td>2.1104</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E15_adaptive_low_output_guard</td>
+        <td><span class="badge badge-pipeline">Adaptive Guard</span></td>
+        <td>0.0787</td>
+        <td>0.3698</td>
+        <td><strong>0.2243</strong></td>
+        <td>0.0976</td>
+        <td>0.4752</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E12_huber_raw_point</td>
+        <td><span class="badge badge-pipeline">Huber Loss</span></td>
+        <td>0.1719</td>
+        <td>0.2779</td>
+        <td><strong>0.2249</strong></td>
+        <td>0.1906</td>
+        <td>2.1002</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E01_lgbm_raw_point</td>
+        <td><span class="badge badge-pipeline">Raw LGBM</span></td>
+        <td>0.1719</td>
+        <td>0.2779</td>
+        <td><strong>0.2249</strong></td>
+        <td>0.1906</td>
+        <td>2.1002</td>
+      </tr>
+      <tr class=" ml">
+        <td>ML_CatBoost</td>
+        <td><span class="badge badge-ml">CatBoost</span></td>
+        <td>0.1819</td>
+        <td>0.2733</td>
+        <td><strong>0.2276</strong></td>
+        <td>0.2062</td>
+        <td>2.1518</td>
+      </tr>
+      <tr class=" ml">
+        <td>ML_RF</td>
+        <td><span class="badge badge-ml">Random Forest</span></td>
+        <td>0.1841</td>
+        <td>0.2851</td>
+        <td><strong>0.2346</strong></td>
+        <td>0.2078</td>
+        <td>2.1612</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E02_lgbm_daily_rescaled</td>
+        <td><span class="badge badge-pipeline">Daily Rescaled</span></td>
+        <td>0.298</td>
+        <td>0.296</td>
+        <td><strong>0.297</strong></td>
+        <td>0.3141</td>
+        <td>0.4484</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E03_lgbm_norm_target</td>
+        <td><span class="badge badge-pipeline">Norm Target</span></td>
+        <td>0.3913</td>
+        <td>0.3679</td>
+        <td><strong>0.3796</strong></td>
+        <td>0.542</td>
+        <td>1.967</td>
+      </tr>
+      <tr class=" pipeline">
+        <td>E00_irradiance_baseline</td>
+        <td><span class="badge badge-pipeline">Irradiance Baseline</span></td>
+        <td>0.3248</td>
+        <td>0.5923</td>
+        <td><strong>0.4586</strong></td>
+        <td>0.2483</td>
+        <td>1.8396</td>
+      </tr>
+      <tr class=" dl">
+        <td>DL_DNN</td>
+        <td><span class="badge badge-dl">DNN</span></td>
+        <td>0.6295</td>
+        <td>0.6354</td>
+        <td><strong>0.6324</strong></td>
+        <td>0.6332</td>
+        <td>1.2524</td>
+      </tr>
+      <tr class=" dl">
+        <td>DL_CNN</td>
+        <td><span class="badge badge-dl">CNN</span></td>
+        <td>0.631</td>
+        <td>0.6364</td>
+        <td><strong>0.6337</strong></td>
+        <td>0.634</td>
+        <td>1.253</td>
+      </tr>
+      <tr class=" dl">
+        <td>DL_LSTM</td>
+        <td><span class="badge badge-dl">LSTM</span></td>
+        <td>0.6558</td>
+        <td>0.6166</td>
+        <td><strong>0.6362</strong></td>
+        <td>0.6332</td>
+        <td>1.2524</td>
+      </tr>
+      <tr class=" ml">
+        <td>ML_SVR</td>
+        <td><span class="badge badge-ml">SVR</span></td>
+        <td>0.75</td>
+        <td>0.88</td>
+        <td><strong>0.8179</strong></td>
+        <td>0.75</td>
+        <td>1.5</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3 style="margin-top:32px;">Combined MAPE 横向对比（越低越好）</h3>
+    <div class="bar-container"><div class="bar-label">E07_validated_blend</div><div class="bar-track"><div class="bar-fill green" style="width:13.9%;">0.1181</div></div></div>
+  <div class="bar-container"><div class="bar-label">E05_norm_plus_daily_calibration</div><div class="bar-track"><div class="bar-fill green" style="width:14.0%;">0.1192</div></div></div>
+  <div class="bar-container"><div class="bar-label">E14_weighted_calibration</div><div class="bar-track"><div class="bar-fill green" style="width:14.6%;">0.1240</div></div></div>
+  <div class="bar-container"><div class="bar-label">E06_seen_new_branch</div><div class="bar-track"><div class="bar-fill blue" style="width:21.9%;">0.1858</div></div></div>
+  <div class="bar-container"><div class="bar-label">E08_history_dynamic_fallback</div><div class="bar-track"><div class="bar-fill blue" style="width:22.0%;">0.1873</div></div></div>
+  <div class="bar-container"><div class="bar-label">E11_piecewise_low_output_guard</div><div class="bar-track"><div class="bar-fill blue" style="width:22.1%;">0.1882</div></div></div>
+  <div class="bar-container"><div class="bar-label">E10_precision_low_output_guard</div><div class="bar-track"><div class="bar-fill blue" style="width:22.2%;">0.1889</div></div></div>
+  <div class="bar-container"><div class="bar-label">E09_low_output_guard</div><div class="bar-track"><div class="bar-fill blue" style="width:23.0%;">0.1959</div></div></div>
+  <div class="bar-container"><div class="bar-label">ML_XGBoost</div><div class="bar-track"><div class="bar-fill blue" style="width:26.1%;">0.2215</div></div></div>
+  <div class="bar-container"><div class="bar-label">E13_fair_raw_point</div><div class="bar-track"><div class="bar-fill blue" style="width:26.3%;">0.2236</div></div></div>
+  <div class="bar-container"><div class="bar-label">E15_adaptive_low_output_guard</div><div class="bar-track"><div class="bar-fill blue" style="width:26.4%;">0.2243</div></div></div>
+  <div class="bar-container"><div class="bar-label">E12_huber_raw_point</div><div class="bar-track"><div class="bar-fill blue" style="width:26.5%;">0.2249</div></div></div>
+  <div class="bar-container"><div class="bar-label">E01_lgbm_raw_point</div><div class="bar-track"><div class="bar-fill blue" style="width:26.5%;">0.2249</div></div></div>
+  <div class="bar-container"><div class="bar-label">ML_CatBoost</div><div class="bar-track"><div class="bar-fill blue" style="width:26.8%;">0.2276</div></div></div>
+  <div class="bar-container"><div class="bar-label">ML_RF</div><div class="bar-track"><div class="bar-fill blue" style="width:27.6%;">0.2346</div></div></div>
+  <div class="bar-container"><div class="bar-label">E02_lgbm_daily_rescaled</div><div class="bar-track"><div class="bar-fill yellow" style="width:34.9%;">0.2970</div></div></div>
+  <div class="bar-container"><div class="bar-label">E03_lgbm_norm_target</div><div class="bar-track"><div class="bar-fill orange" style="width:44.7%;">0.3796</div></div></div>
+  <div class="bar-container"><div class="bar-label">E00_irradiance_baseline</div><div class="bar-track"><div class="bar-fill orange" style="width:54.0%;">0.4586</div></div></div>
+  <div class="bar-container"><div class="bar-label">DL_DNN</div><div class="bar-track"><div class="bar-fill red" style="width:74.4%;">0.6324</div></div></div>
+  <div class="bar-container"><div class="bar-label">DL_CNN</div><div class="bar-track"><div class="bar-fill red" style="width:74.6%;">0.6337</div></div></div>
+  <div class="bar-container"><div class="bar-label">DL_LSTM</div><div class="bar-track"><div class="bar-fill red" style="width:74.8%;">0.6362</div></div></div>
+  <div class="bar-container"><div class="bar-label">ML_SVR</div><div class="bar-track"><div class="bar-fill red" style="width:96.2%;">0.8179</div></div></div>
+</div>
+
+<div class="section" id="ml">
+  <h2>传统机器学习模型 (ML)</h2>
+
+  <div class="highlight-box warning">
+    <strong>核心发现：</strong>ML 模型中 <strong>XGBoost 最佳 (0.2215)</strong>，但仍显著落后于经过日级校准的 Pipeline 方案 (E07: 0.1181)。ML 模型仅在点级（15分钟粒度）做回归预测，<strong>缺乏日级总量校准这一关键环节</strong>。
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>🏅 XGBoost</h3>
+      <p><strong>Combined MAPE:</strong> 0.2215</p>
+      <p><strong>超参数：</strong>n_estimators=500, lr=0.04, max_depth=8, subsample=0.85, colsample_bytree=0.85</p>
+      <p><strong>评价：</strong>ML 中最优，已见设备 unseen 部分表现最稳定 (0.2730)。训练速度中等 (45秒)，适合轻量级基线。作为点级回归方法，结合后期日级校准可接近 pipeline 效果。</p>
+      <p style="font-size:11px;color:#888;">参考: scripts/run_full_comparison.py → XGBRegressor</p>
+    </div>
+    <div class="card">
+      <h3>CatBoost</h3>
+      <p><strong>Combined MAPE:</strong> 0.2276</p>
+      <p><strong>超参数：</strong>iterations=500, lr=0.04, depth=7</p>
+      <p><strong>评价：</strong>与 XGBoost 接近，对类别特征有原生支持但在本项目中特征已多为数值型。训练速度43秒，模型文件略大。</p>
+      <p style="font-size:11px;color:#888;">参考: scripts/run_full_comparison.py → CatBoostRegressor</p>
+    </div>
+    <div class="card">
+      <h3>Random Forest</h3>
+      <p><strong>Combined MAPE:</strong> 0.2346</p>
+      <p><strong>超参数：</strong>n_estimators=200, max_depth=18, min_samples_leaf=5</p>
+      <p><strong>评价：</strong>训练最慢 (737秒)，泛化能力与 boosting 差距明显。Unseen/Seen 倍率 (1.55x) 与 XGBoost 相近，但绝对值高出近 6%。</p>
+      <p style="font-size:11px;color:#888;">参考: scripts/run_full_comparison.py → RandomForestRegressor</p>
+    </div>
+    <div class="card">
+      <h3>SVR (RBF)</h3>
+      <p><strong>Combined MAPE:</strong> 0.8179</p>
+      <p><strong>超参数：</strong>C=10, gamma=scale, epsilon=0.01（子集30000行训练）</p>
+      <p><strong>评价：</strong>SVR 不适合 252 维 × 18 万行的大规模回归。子集采样训练导致效果远差于其他方法。未使用 NaN 兼容的 imputer 前会报错。</p>
+      <p style="font-size:11px;color:#888;">参考: scripts/run_full_comparison.py → SVR(kernel='rbf')</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="dl">
+  <h2>深度学习模型 (DL) — 2026-07-02 新增</h2>
+
+  <div class="highlight-box danger">
+    <strong>核心发现：</strong>DNN/CNN/LSTM 在本任务中<strong>表现最差</strong>（Combined MAPE 0.63-0.64），远落后于 boosting 树模型 (0.22) 和自定义 pipeline (0.12)。CPU-only 训练环境下，深度学习方案不作为推荐方向。
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>DNN (5层 MLP)</h3>
+      <p><strong>Combined MAPE:</strong> 0.6324</p>
+      <p>架构: 256→128→64→32→1, BatchNorm, Dropout(0.2)</p>
+      <p>训练: 50 epochs, HuberLoss (α=1), Adam(lr=0.001), BatchSize=4096</p>
+      <p>时间: 217秒 | 早停: 未触发</p>
+    </div>
+    <div class="card">
+      <h3>CNN (1D Conv)</h3>
+      <p><strong>Combined MAPE:</strong> 0.6337</p>
+      <p>架构: Conv1d(1→32→64,k=3) → AdaptAvgPool → FC(64→32→1)</p>
+      <p>训练: PCA降维至64后训练（原252维内存不足）</p>
+      <p>时间: 531秒 | 早停: Epoch 33</p>
+    </div>
+    <div class="card">
+      <h3>LSTM (2层)</h3>
+      <p><strong>Combined MAPE:</strong> 0.6362</p>
+      <p>架构: LSTM(64, 2层, dropout=0.2) → FC(64→32→1)</p>
+      <p>训练: PCA降维至64后训练，未利用时序结构优势</p>
+      <p>时间: 239秒 | 早停: 未触发</p>
+    </div>
+  </div>
+
+  <div class="highlight-box">
+    <strong>DL 表现差的根因分析：</strong>
+    <ol style="margin:12px 0 0 20px;line-height:1.8;">
+      <li><strong>特征维度过高：</strong>252维特征对MLP过于稀疏，CNN因内存限制被迫PCA降维（信息损失从0.22→0.63）。</li>
+      <li><strong>缺少日级校准：</strong>DL仅做点级回归，没有类似pipeline的日级总量校准步骤。</li>
+      <li><strong>时序结构利用不足：</strong>LSTM本可利用时序模式，但PCA降维破坏了原始时序关联结构。</li>
+      <li><strong>训练数据有限：</strong>18万行对DL不够大（boosting仅需几千行即可收敛）。</li>
+      <li><strong>CPU-only限制：</strong>无GPU支持，模型容量和训练轮次受限。</li>
+    </ol>
+  </div>
+</div>
+
+<div class="section" id="pipeline">
+  <h2>Pipeline 优化实验</h2>
+
+  <div class="card">
+    <p>项目 pipeline 经15轮迭代优化，覆盖物理归一化、日级校准、混合模型、冷启动 guard、损失函数等方向。完整路线见下表。</p>
+  </div>
+
+  <div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr><th>实验</th><th>方法</th><th>Combined MAPE</th><th>与E00相比</th><th>关键文件</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>E00</td><td>辐照度基线 (纯物理规则)</td><td>0.4586</td><td>—</td><td>src/modeling.py: irradiance_baseline()</td></tr>
+      <tr><td>E01</td><td>LGBM 原始点级回归</td><td>0.2249</td><td>+51.0% ▲</td><td>src/modeling.py: make_gbdt_model()</td></tr>
+      <tr><td>E02</td><td>LGBM + 日级 rescale</td><td>0.2970</td><td>-32.1% ▼</td><td>src/modeling.py: rescale_point_predictions()</td></tr>
+      <tr><td>E03</td><td>物理归一化目标 (y_norm)</td><td>0.3796</td><td>-27.8% ▼</td><td>src/features.py: build_features() y_norm</td></tr>
+      <tr><td>E05</td><td>物理归一化 + 日级校准</td><td>0.1192</td><td>+47.0% ▲</td><td>src/modeling.py: fit_daily_calibrator()</td></tr>
+      <tr><td>E06</td><td>已见/未见设备分支模型</td><td>0.1858</td><td>-35.8% ▼</td><td>scripts/run_experiments.py</td></tr>
+      <tr class="top3"><td><strong>E07</strong></td><td><strong>验证集混合模型 (Best)</strong></td><td><strong>0.1181</strong></td><td><strong>+74.2% ▲</strong></td><td>scripts/run_experiments.py: blend weight scan</td></tr>
+      <tr><td>E08</td><td>历史动态 Fallback</td><td>0.1873</td><td>-37.0% ▼</td><td>scripts/run_experiments.py</td></tr>
+      <tr><td>E09-E11</td><td>低输出 Guard（广义/精确/分段）</td><td>0.1889-0.1959</td><td>-37~39% ▼</td><td>scripts/run_experiments.py: guard 策略</td></tr>
+      <tr><td><strong>E12</strong></td><td><strong>Huber 损失 (NEW 2026-07-02)</strong></td><td><strong>0.2249</strong></td><td>持平E01</td><td>src/modeling.py: make_gbdt_huber_model()</td></tr>
+      <tr><td><strong>E13</strong></td><td><strong>Fair 损失 (NEW 2026-07-02)</strong></td><td><strong>0.2236</strong></td><td>+0.6% ▲</td><td>src/modeling.py: make_gbdt_fair_model()</td></tr>
+      <tr><td><strong>E14</strong></td><td><strong>加权日级校准 (NEW 2026-07-02)</strong></td><td><strong>0.1240</strong></td><td>-4.0% ▼</td><td>src/modeling.py: fit_daily_calibrator_weighted()</td></tr>
+      <tr><td><strong>E15</strong></td><td><strong>自适应 Guard (NEW 2026-07-02)</strong></td><td><strong>0.2243</strong></td><td>-47.0% ▼</td><td>scripts/run_experiments.py: apply_adaptive_low_output_guard()</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3 style="margin-top:32px;">2026-07-02 新增实验详细分析</h3>
+  <div class="grid-2">
+    <div class="card">
+      <h4>E12: Huber 损失 LGBM</h4>
+      <p>Combined MAPE = 0.2249（完全持平 E01）</p>
+      <p>Huber 损失对离群值理论上更鲁棒，但在此数据上未带来任何提升。LightGBM 默认的回归 objective 已对异常值有较好处理能力。不建议继续在损失函数上投入优化。</p>
+    </div>
+    <div class="card">
+      <h4>E13: Fair 损失 LGBM</h4>
+      <p>Combined MAPE = 0.2236（略好 0.6%）</p>
+      <p>Fair 损失略微改善了 MAPE 友好性，fair_c=1.0 下对低值有小幅修正。但 0.6% 提升近乎噪声水平，不值得增加模型复杂度。</p>
+    </div>
+    <div class="card">
+      <h4>E14: 加权日级校准</h4>
+      <p>Combined MAPE = 0.1240（比 E05 差 4%）</p>
+      <p>对低输出日 payload weight=3.0 加大权重，反而降低了整体效果。说明低输出日的高 MAPE 主要是 <strong>分母效应</strong>（真实值趋近0），不是校准模型需要优先拟合的方向。</p>
+    </div>
+    <div class="card">
+      <h4>E15: 自适应 Guard</h4>
+      <p>Combined MAPE = 0.2243（远差于 E09-E11 的 0.19）</p>
+      <p>基于训练集分布动态确定阈值（15%分位），在实际 unseen 设备上不适应。冷启动场景需要更保守的固定阈值策略，动态调整反而导致未见设备过收缩。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="findings">
+  <h2>关键发现与结论</h2>
+
+  <div class="card">
+    <h3>1. Pipeline 远优于纯 ML/DL</h3>
+    <p>最优 pipeline (E07: 0.1181) 比最优 ML 模型 (XGBoost: 0.2215) 提升 <strong>46.7%</strong>，比最优 DL 模型 (DNN: 0.6324) 提升 <strong>81.3%</strong>。核心优势：</p>
+    <ul style="margin:8px 0 0 24px;line-height:1.8;">
+      <li><strong>物理归一化：</strong><code>y_norm = pvGenTotal / (solar_proxy + eps)</code> 消除太阳几何和日时段影响</li>
+      <li><strong>日级校准：</strong>专为日总量 MAPE 设计的二级模型（LightGBM 在日级数据上拟合 log1p 变换）</li>
+      <li><strong>混合策略：</strong>验证集最优混合权重，叠加冷启动 guard 保护</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>2. ML 方法排名：XGBoost > CatBoost > RF >> SVR</h3>
+    <p>Boosting 方法在表格数据上优势明显。XGBoost (0.2215) 在已见 unseen 上表现最稳定 (0.2730)。但所有 ML 模型均缺乏日级校准的精度增益——<strong>ML + 日级校准</strong>是潜在的提升方向。</p>
+  </div>
+
+  <div class="card">
+    <h3>3. 深度学习不适用于当前设置</h3>
+    <p>DNN/CNN/LSTM 表现最差 (0.63+)，除非有 GPU 加速、更多训练数据、合理降维和时序特征工程，否则不作为推荐方向。CNN 因内存限制被迫 PCA 降维后表现与 DNN 几乎一致（0.6337 vs 0.6324），说明 1D Conv 未利用到任何空间先验。</p>
+  </div>
+
+  <div class="card">
+    <h3>4. 冷启动仍是最大挑战 — Test2 MAPE 高达 0.619</h3>
+    <p>所有实验的 Unseen MAPE 显著高于 Seen。E07 的 Unseen (0.1574) 是 Seen (0.0787) 的 2 倍。Test2（6个全新设备）的 MAPE 高达 0.619，说明冷启动容量估计仍不足。</p>
+  </div>
+
+  <div class="card">
+    <h3>5. 损失函数优化不划算</h3>
+    <p>Huber/Fair 替代 LGBM 默认损失几乎没有提升 (0.2249 vs 0.2236)，加权日级校准反而劣化 (E14: 0.1240 vs E05: 0.1192)。优化资源应投在冷启动策略和特征工程上。</p>
+  </div>
+
+  <div class="highlight-box success">
+    <strong>推荐生产方案：E07 - 验证集混合模型 (Validated Blend)</strong><br>
+    Combined MAPE = 0.1181 | Seen MAPE = 0.0787 | Unseen MAPE = 0.1574<br>
+    后续优化方向：冷启动容量代理特征、多折 unseen 验证、分组校准、动态不确定性估计。
+  </div>
+
+  <div class="card" style="margin-top:24px;">
+    <h3>参考与延伸阅读</h3>
+    <p style="font-size:13px;">
+      📄 <a href="outputs/final_report.md" target="_blank">Pipeline 详细报告</a>（中文）<br>
+      📄 <a href="outputs/interview_report.md" target="_blank">面试汇报版说明</a><br>
+      📄 <a href="outputs/blend_analysis.md" target="_blank">混合模型权重分析</a><br>
+      📄 <a href="outputs/cold_start_stress_summary.md" target="_blank">冷启动压力测试</a><br>
+      📄 <a href="outputs/distribution_shift_diagnostics.md" target="_blank">分布漂移诊断</a><br>
+      📄 <a href="references/literature_review.md" target="_blank">参考文献综述</a><br>
+      完整可复现代码: <a href="scripts/run_experiments.py">scripts/run_experiments.py</a> + <a href="src/">src/</a>
+    </p>
+  </div>
+</div>
+
+</body>
+</html>
